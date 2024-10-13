@@ -98,7 +98,7 @@ getRMSE(resp, pred, na.rm = TRUE)
 
 Sweet, that one works too!
 
-5.  Now, we'll create a wrapper function where we can get call one or both of our above error measurements. Return them with appropriate names:
+5.  Now, we'll create a wrapper function where we can call one or both of our above error measurements. Return them with appropriate names:
 
 ```{r}
 errorCalc = function(y_rep, y_pred, fun = c('MAE','RMSE'), ...){
@@ -153,10 +153,12 @@ And finally, let's see what happens when we make the response data into a data f
 
 # let's make the response into a df and see what happens
 df_resp = data.frame(resp)
-errorCalc(df_resp, pred, na.rm = TRUE)
+#errorCalc(df_resp, pred, na.rm = TRUE)
 ```
 
-Our error response worked as intended! This concludes our testing of this function. Now we can move onto the API task.
+Our error response worked as intended! I needed to comment the error-producing line of code, so that the quarto document would render appropriately. In order to observe the error message, simply un-comment the last line in the code chunk above.
+
+This concludes our testing of this function. Now we can move onto the API task.
 
 ## Task 3: Querying API & Tidyverse-style function
 
@@ -168,6 +170,7 @@ library(httr)
 library(lubridate)
 library(jsonlite)
 library(purrr)
+library(dplyr)
 ```
 
 And now we can run a query:
@@ -181,16 +184,71 @@ articles = pluck(news$articles) # use pluck to get the articles into a df
 nrow(articles) # cool, we now have 36 articles! Some are removed, but still some good info here
 ```
 
-Next, we'll write a function to let us easily query the API:
+4.  Next, we'll write a function to let us easily query the API:
 
 ```{r}
-newsQuery = function(subj = "regeneration", time = "2024-10-08", key){ # we'll set a default date and subject, but leave key a required arg
-api_url = as.character(paste("https://newsapi.org/v2/everything?q=", subj, "&from=",time,"&sortBy=popularity&apiKey=",key, sep=''))
-d = get(api_url)
+newsQuery = function(subj = "regeneration", date = "2024-10-08", key= "3c0a9ab17b4e4c33b26c125d12de76c6"){ # we'll set some defaults above
+api_url = as.character(paste("https://newsapi.org/v2/everything?q=", subj, "&from=",date,"&to=2024-10-13&sortBy=popularity&apiKey=",key, sep=''))
+d = GET(api_url)
 news = fromJSON(rawToChar(d$content)) 
 articles = pluck(news$articles)
 return(articles)
 }
 ```
 
-Now we let a user specify their subject, from date (up to present), and their key. Let's test with a samp
+Now we let a user specify their subject, from date (up to present), and their key. First, let's make a one-way contigency table of a search's sources:
+
+```{r}
+art = newsQuery(subj = "regeneration", date = "2024-10-10", key = "3c0a9ab17b4e4c33b26c125d12de76c6") # get articles about regeneration 
+art2 = newsQuery(subj = "penguins", date = "2024-10-10", key = "3c0a9ab17b4e4c33b26c125d12de76c6") # get articles about penguins - penguins are awesome
+sources = art$source$name # grab source names for first search (regeneration)
+table(sources) # make contingency table
+```
+
+We can see that a lot of sources only have one article on regeneration since the specified day, but some have multiple articles (such as ETF Daily Reader).
+
+5.  Now, lets turn the publishedAt column into a data column with lubridate:
+
+```{r}
+time1 = art$publishedAt
+art$publishedAt = ymd_hms(time1)
+art_sort = art[order(art$publishedAt),] # sort the first set of articles
+art_sort = art_sort |>
+  mutate(pub_diffs = as.numeric(difftime(publishedAt, lag(publishedAt), units = 'mins')))
+
+# let's view the outcome to make sure this worked
+art_sort$pub_diffs
+```
+
+Great, this worked just as intended! We could write a function to make this conversion happen, and then use that function on our second set of articles. However, since we are just doing demonstrations here, we will just run the same code again - we won't lose much efficiency with this.
+
+```{r}
+time2 = art2$publishedAt
+art2$publishedAt = ymd_hms(time2)
+art2_sort = art2[order(art2$publishedAt),] # sort the first set of articles
+art2_sort = art2_sort |>
+  mutate(pub_diffs = as.numeric(difftime(publishedAt, lag(publishedAt), units = 'mins')))
+
+# let's view the outcome to make sure this worked
+art2_sort$pub_diffs
+```
+
+Cool, now we have both our data frames with the intended outcome columns!
+
+6.  Last but not least, now we will subset the dfs to return date versions of publishedAt and the pub_diff values. Then we will use map() to return mean, sd, and median of these columns using an anonymous function. We'll repeat this for both dfs.
+
+```{r}
+d1 = art_sort |>
+  select("publishedAt", "pub_diffs")
+map(d1, \(x) list(mean = mean(x, na.rm=TRUE),median = median(x, na.rm=TRUE),sd = sd(x, na.rm=TRUE)))
+```
+
+Finally, we can do the same for the second data frame:
+
+```{r}
+d2 = art2_sort |>
+  select("publishedAt", "pub_diffs")
+map(d2, \(x) list(mean = mean(x, na.rm=TRUE),median = median(x, na.rm=TRUE),sd = sd(x, na.rm=TRUE)))
+```
+
+We can see that our second query (Penguins) had shorted intervals between uploads over the past three days. This may be due to sporting events related to the Pittsburgh Penguins. We also see that taking the SD of the lubridate object does not yield a result in the same format as the other entries. This likely is the SD in seconds, although we'd need to explore the documentation and do some testing to ensure that we are able to appropriately interpret this value.
