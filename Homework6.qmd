@@ -1,0 +1,196 @@
+---
+title: "Homework6"
+author: "Patrick Seebold"
+format: html
+editor: visual
+---
+
+## Task 1: Conceptual Questions
+
+1.  What is the purpose of the lapply() function? What is the equivalent purrr function?
+
+    > The lapply() is a vectorized approach that lets us apply a function across the elements of a list more efficiently than if we used for loops. The equivalent purrr function is the map() function.
+
+2.  Suppose we have a list called my_list. Each element of the list is a numeric data frame (all columns are numeric). We want use lapply() to run the code cor(numeric_matrix, method = "kendall") on each element of the list. Write code to do this below! (I’m really trying to ask you how you specify method = "kendall" when calling lapply()
+
+    > We need to remember that we specify the additional args for the function in lapply() differently than we would for normal functions. The code would be:
+    >
+    > lapply(my_list, cor, method = "kendall")
+
+3.  What are two advantages of using purrr functions instead of the BaseR apply family?
+
+    > Purrr is tidyverse compatible and more consistent than the apply() family packages. It also can save a few keystrokes to accomplish the same outcomes in apply().
+
+4.  What is a side-effect function?
+
+    > A side-effect function is a function that prints out some output without changing the incoming data. This is different from transformation functions, which changes the incoming data in some way.
+
+5.  Why can you name a variable sd in a function and not cause any issues with the sd function?
+
+    > We can use the same variable names across these functions because of R's lexical scoping. Functions will each have their own function environment, separate from the global environment. Since these function environments are removed after the function executes, there will be no conflict between different functions with the same variable names.
+
+## Task 2: Writing R Functions
+
+1.  Write a function to calculate RMSE from a vector of responses and return a vector of predictions. Allow for extra arguments for missing values to be sent to the internal mean() function.
+
+```{r}
+getRMSE = function(y_rep, y_pred, ...){
+  n = length(y_rep)
+  mean = sqrt((mean(y_rep - y_pred, ...)^2)/n)
+  return(mean)
+  }
+```
+
+2.  Now we can test the code:
+
+```{r}
+# generate data
+set.seed(10)
+n <- 100
+x <- runif(n)
+resp <- 3 + 10 * x + rnorm(n)
+pred <- predict(lm(resp ~ x), data.frame(x))
+
+getRMSE(resp,pred) # pretty small error!
+```
+
+And let's do it again after replacing two values with NA_real\_:
+
+```{r}
+resp[2] = NA_real_
+resp[1] = NA_real_
+getRMSE(resp, pred, na.rm = FALSE)
+getRMSE(resp, pred, na.rm = TRUE)
+```
+
+We see that we have successfully managed to get the na.rm arg fed into our mean function within our getRMSE function!
+
+3.  Now we set up a function for MAE:
+
+```{r}
+getMAE = function(y_rep, y_pred, ...){
+  n = length(y_rep)
+  mean = (mean(abs(y_rep - y_pred), ...))/n
+  return(mean)
+  }
+```
+
+4.  Now we test this one too:
+
+```{r}
+set.seed(10)
+n <- 100
+x <- runif(n)
+resp <- 3 + 10 * x + rnorm(n)
+pred <- predict(lm(resp ~ x), data.frame(x))
+
+getMAE(resp,pred)
+```
+
+And now we test after replacing values with NA_real\_:
+
+```{r}
+resp[2] = NA_real_
+resp[1] = NA_real_
+getRMSE(resp, pred, na.rm = FALSE)
+getRMSE(resp, pred, na.rm = TRUE)
+```
+
+Sweet, that one works too!
+
+5.  Now, we'll create a wrapper function where we can get call one or both of our above error measurements. Return them with appropriate names:
+
+```{r}
+errorCalc = function(y_rep, y_pred, fun = c('MAE','RMSE'), ...){
+  r = list() # initialize empty return vector
+  if (is.vector(y_rep) & is.numeric(y_rep)){
+    if (is.vector(y_pred) & is.numeric(y_pred)){
+      if ("MAE" %in% fun){
+       MAE = getMAE(y_rep, y_pred, ...)
+       r = append(r, paste("MAE =", MAE))
+       }
+      if("RMSE" %in% fun){
+        RMSE = getRMSE(y_rep, y_pred, ...)
+        r = append(r,paste("RMSE =", RMSE))
+      }
+      }else {
+      stop("Make sure predicted y is numeric vector")
+    } 
+  } else {
+      stop("Make sure response y is numeric vector")
+  } 
+  return(unlist(r)) # if we plan to use this programatically in the future, we will
+                    # need to change this output, but unlist() works well here!
+}
+```
+
+Now we test our function:
+
+```{r}
+set.seed(10)
+n <- 100
+x <- runif(n)
+resp <- 3 + 10 * x + rnorm(n)
+pred <- predict(lm(resp ~ x), data.frame(x))
+
+errorCalc(resp, pred) # with default, both error types
+errorCalc(resp, pred, "MAE")  # with just MAE
+errorCalc(resp, pred, "RMSE") # and just RMSE
+```
+
+Excellent, the wrapper function is working! Now let's test what happens when we replace NA values in the data:
+
+```{r}
+resp[2] = NA_real_
+resp[1] = NA_real_
+errorCalc(resp, pred, na.rm = FALSE)
+errorCalc(resp, pred, na.rm = TRUE)
+```
+
+And finally, let's see what happens when we make the response data into a data frame instead of a vector:
+
+```{r}
+
+# let's make the response into a df and see what happens
+df_resp = data.frame(resp)
+errorCalc(df_resp, pred, na.rm = TRUE)
+```
+
+Our error response worked as intended! This concludes our testing of this function. Now we can move onto the API task.
+
+## Task 3: Querying API & Tidyverse-style function
+
+We'll query the News API for the next part of the HW:
+
+```{r}
+# grab the libraries we'll need first
+library(httr)
+library(lubridate)
+library(jsonlite)
+library(purrr)
+```
+
+And now we can run a query:
+
+```{r}
+# we'll start by grabbing some recent headlines about regeneration - hopefully we find some cool science articles!
+d = httr::GET("https://newsapi.org/v2/everything?q=regeneration&from=2024-10-08&to=2024-10-08&sortBy=popularity&apiKey=3c0a9ab17b4e4c33b26c125d12de76c6")
+news = fromJSON(rawToChar(d$content))  # convert to json
+articles = pluck(news$articles) # use pluck to get the articles into a df
+
+nrow(articles) # cool, we now have 36 articles! Some are removed, but still some good info here
+```
+
+Next, we'll write a function to let us easily query the API:
+
+```{r}
+newsQuery = function(subj = "regeneration", time = "2024-10-08", key){ # we'll set a default date and subject, but leave key a required arg
+api_url = as.character(paste("https://newsapi.org/v2/everything?q=", subj, "&from=",time,"&sortBy=popularity&apiKey=",key, sep=''))
+d = get(api_url)
+news = fromJSON(rawToChar(d$content)) 
+articles = pluck(news$articles)
+return(articles)
+}
+```
+
+Now we let a user specify their subject, from date (up to present), and their key. Let's test with a samp
